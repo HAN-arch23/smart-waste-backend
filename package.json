@@ -19,5 +19,11 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
+  },
+  {
+  "devDependencies": {
+    "webpack": "^X.X.X",
+    "webpack-cli": "^X.X.X"
   }
+}
 }
