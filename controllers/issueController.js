@@ -212,18 +212,50 @@ const deleteIssue = async (req, res) => {
 // @access  Private (admin)
 const getStats = async (req, res) => {
   try {
-    const [total, pending, inProgress, resolved, rejected, byCategory] = await Promise.all([
-      Issue.countDocuments(),
-      Issue.countDocuments({ status: 'pending' }),
-      Issue.countDocuments({ status: { $in: ['assigned', 'collected', 'recycled'] } }),
-      Issue.countDocuments({ status: 'resolved' }),
-      Issue.countDocuments({ status: 'rejected' }),
-      Issue.aggregate([
-        { $group: { _id: '$category', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]),
-    ])
-    res.status(200).json({ total, pending, inProgress, resolved, rejected, byCategory })
+    const since = new Date()
+    since.setUTCHours(0, 0, 0, 0)
+    since.setUTCDate(since.getUTCDate() - 13)
+
+    const [total, pending, inProgress, resolved, rejected, byCategory, byStatus, daily, resTime] =
+      await Promise.all([
+        Issue.countDocuments(),
+        Issue.countDocuments({ status: 'pending' }),
+        Issue.countDocuments({ status: { $in: ['assigned', 'collected', 'recycled'] } }),
+        Issue.countDocuments({ status: 'resolved' }),
+        Issue.countDocuments({ status: 'rejected' }),
+        Issue.aggregate([
+          { $group: { _id: '$category', count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ]),
+        Issue.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+        Issue.aggregate([
+          { $match: { createdAt: { $gte: since } } },
+          { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+        ]),
+        Issue.aggregate([
+          { $match: { status: 'resolved', resolvedAt: { $ne: null } } },
+          { $group: { _id: null, avgMs: { $avg: { $subtract: ['$resolvedAt', '$createdAt'] } } } },
+        ]),
+      ])
+
+    const perDay = {}
+    daily.forEach(d => { perDay[d._id] = d.count })
+    const overTime = []
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(since)
+      d.setUTCDate(since.getUTCDate() + i)
+      const key = d.toISOString().slice(0, 10)
+      overTime.push({ date: key.slice(5), count: perDay[key] || 0 })
+    }
+
+    const avgResolutionHours = resTime.length
+      ? Math.round((resTime[0].avgMs / 36e5) * 10) / 10
+      : null
+
+    res.status(200).json({
+      total, pending, inProgress, resolved, rejected,
+      byCategory, byStatus, overTime, avgResolutionHours,
+    })
   } catch (error) {
     res.status(500).json({ message: 'Server error.' })
   }
